@@ -187,3 +187,100 @@ validation. Any change to the input format must be reflected here first.
   revenue calculations.
 - Fee attribution per product is not possible from this file: fees are
   recorded at the order level, not at the line-item level.
+
+  
+---
+
+## 4. Deposits
+
+**Source file pattern:** `EtsyDeposits*.csv`
+**Export location:** Etsy Shop Manager → Finances → Deposits → Download CSV
+**Row meaning:** one payout from Etsy to the shop's bank account.
+
+### Required columns
+
+| Column | Type | Notes |
+|---|---|---|
+| `Date` | date | Payout date, format `Month D, YYYY` (e.g. `January 5, 2026`) |
+| `Amount` | decimal | Amount transferred to the bank account |
+| `Currency` | string | ISO code, e.g. `USD` |
+| `Status` | string | e.g. `Executed` |
+| `Bank Account Ending Digits` | string | Last 4 digits of the receiving account |
+
+### Validation rules
+
+- `Date` must parse as a date.
+- `Amount` must parse as a decimal.
+- `Currency` must be `USD` in the current MVP.
+- `Status` is expected to be `Executed`. Other values are logged as warnings.
+- `Bank Account Ending Digits` identifies which account received the payout.
+  Multiple accounts are allowed but not expected in a single-shop scenario.
+
+### Notes
+
+- This file is the **cash-flow source**. It tells when money actually
+  arrived at the bank, which is different from when orders were placed.
+- A single deposit usually aggregates **many** payments. The relationship
+  is one-to-many: `Deposits (1) → Payments (many)`.
+- A reconciliation check should compare the sum of `Payments.Net Amount`
+  for a given week of `Funds Available` against the corresponding deposit.
+  Differences are expected due to:
+  - rolling reserve held by Etsy,
+  - chargebacks,
+  - payout scheduling delays,
+  - cross-week aggregation.
+  A difference is a warning, not an error.
+- Do **not** use deposits to calculate revenue. Deposits are cash movement,
+  not sales.
+
+  
+---
+
+## 5. Listings Download
+
+**Source file pattern:** `EtsyListingsDownload*.csv`
+**Export location:** Etsy Shop Manager → Listings → Download CSV
+**Row meaning:** one listing in the shop's catalog.
+
+### Required columns
+
+| Column | Type | Notes |
+|---|---|---|
+| `TITLE` | string | Listing title |
+| `DESCRIPTION` | string | Full description (may contain newlines) |
+| `PRICE` | decimal | Current price |
+| `CURRENCY_CODE` | string | ISO code, e.g. `USD` |
+| `QUANTITY` | integer | Available quantity |
+| `TAGS` | string | Comma-separated tags |
+
+### Optional columns
+
+`MATERIALS`, `IMAGE1`..`IMAGE10`, `VARIATION 1 TYPE`,
+`VARIATION 1 NAME`, `VARIATION 1 VALUES`, `VARIATION 2 TYPE`,
+`VARIATION 2 NAME`, `VARIATION 2 VALUES`, `VARIATION 3 TYPE`,
+`VARIATION 3 NAME`, `VARIATION 3 VALUES`, `SKU`.
+
+### Validation rules
+
+- `TITLE` must be non-empty.
+- `PRICE` must parse as a decimal.
+- `QUANTITY` must parse as an integer (can be 0).
+- `TAGS` is a comma-separated string; individual tags are trimmed.
+- `SKU` is often empty; do not rely on it.
+
+### Notes
+
+- **This file does not contain `Listing ID`.** It also has no `created_date`,
+  `state`, or `category`. All columns named in the original product
+  specification that are not present here cannot be provided by the source.
+- Because there is no `Listing ID`, this catalog **cannot be joined** to
+  sales data (`EtsySoldOrderItems*.csv` contains `Listing ID`, but the
+  catalog does not). This is a hard limitation of the Etsy export.
+- Consequence:
+  - ABC analysis by catalog is **not possible** in the MVP.
+  - "Products with no sales" report is **not possible** in the MVP.
+  - Category-level and tag-level analytics are **not possible**.
+  - Sales analytics must be built from `EtsySoldOrderItems*.csv` alone.
+- A future Phase 2 may allow manual mapping of catalog rows to
+  `Listing ID` via SKU or title, but this requires human confirmation
+  and confidence scoring and is out of scope for the MVP.
