@@ -164,15 +164,17 @@ revenue, growth is reported as `N/A`, never as a division by zero.
 ## Geographic metrics
 
 ### Revenue by Country
-Aggregate `Gross Revenue` by `Payments.… ` — actually by
-`SoldOrders.Ship Country`, since Payments has no country column.
+
+`Payments` has no country column, so join through `SoldOrders`:
 Revenue by Country = SUM(Payments.Gross Amount)
-JOIN SoldOrders ON Order ID
+JOIN SoldOrders ON Payments.Order ID = SoldOrders.Order ID
 GROUP BY SoldOrders.Ship Country
+
+Source: `EtsyDirectCheckoutPayments*.csv` joined with `EtsySoldOrders*.csv`.
 
 ### Orders by Country
 Orders by Country = COUNT(DISTINCT Payments.Order ID)
-JOIN SoldOrders ON Order ID
+JOIN SoldOrders ON Payments.Order ID = SoldOrders.Order ID
 GROUP BY SoldOrders.Ship Country
 
 ## Cash flow metrics
