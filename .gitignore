@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Build artifacts
+build/
+dist/
+*.spec
+*.exe
+
+# Local data — NEVER commit
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.xlsx
+*.log
+
+# Real Etsy exports — PII risk
+Etsy*.csv
+Etsy*.xlsx
+
+# Secrets
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.idea/
+.vscode/
