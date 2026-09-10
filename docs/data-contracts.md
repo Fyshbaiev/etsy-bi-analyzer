@@ -73,3 +73,59 @@ validation. Any change to the input format must be reflected here first.
   Any mismatch is recorded as a data quality issue.
 - The column `Status` is present but frequently empty. Refunds are detected
   from the `Payments` file, not from this column.
+
+  
+---
+
+## 2. Order Items
+
+**Source file pattern:** `EtsySoldOrderItems*.csv`
+**Export location:** Etsy Shop Manager → Orders → Download CSV
+**Row meaning:** one line item. An order with three items produces three rows.
+
+### Required columns
+
+| Column | Type | Notes |
+|---|---|---|
+| `Sale Date` | date | Format `MM/DD/YY` |
+| `Order ID` | string | Foreign key to `SoldOrders` |
+| `Transaction ID` | string | Unique per line item |
+| `Listing ID` | string | Identifier of the sold listing |
+| `Item Name` | string | Listing title at the moment of sale |
+| `Quantity` | integer | Units sold in this line |
+| `Price` | decimal | Unit price |
+| `Item Total` | decimal | `Price × Quantity`, before discount |
+| `Currency` | string | ISO code, e.g. `USD` |
+
+### Optional columns
+
+`Buyer`, `Coupon Code`, `Coupon Details`, `Discount Amount`,
+`Shipping Discount`, `Order Shipping`, `Order Sales Tax`, `Date Paid`,
+`Date Shipped`, `Ship Name`, `Ship Address1`, `Ship Address2`,
+`Ship City`, `Ship State`, `Ship Zipcode`, `Ship Country`,
+`Variations`, `Order Type`, `Listings Type`, `Payment Type`,
+`InPerson Discount`, `InPerson Location`, `VAT Paid by Buyer`, `SKU`.
+
+### Validation rules
+
+- `Order ID` must be non-empty and must exist in `SoldOrders`.
+  Orphan rows are recorded as data quality issues.
+- `Transaction ID` must be non-empty and unique across all imports.
+- `Listing ID` must be non-empty.
+- `Quantity` must be a positive integer.
+- `Price`, `Item Total` must parse as decimals.
+- `Item Total` should equal `Price × Quantity`. A mismatch is a warning.
+- `SKU` is often empty; do not rely on it.
+- Multiple rows with the same `Order ID` are expected and valid
+  (one row per line item).
+
+### Notes
+
+- This is the **only file** in the Etsy export set that contains both
+  `Order ID` and `Listing ID` together. All product-level analytics
+  (Top Products, ABC, revenue by listing) depend on this file.
+- The catalog file `EtsyListingsDownload*.csv` does **not** contain a
+  `Listing ID` column, so a direct join between catalog and sales is not
+  possible. This is a known limitation.
+- `Discount Amount` on this row is the per-line discount. It is separate
+  from the order-level discount in `SoldOrders`.
