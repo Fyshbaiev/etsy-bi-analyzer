@@ -129,3 +129,61 @@ validation. Any change to the input format must be reflected here first.
   possible. This is a known limitation.
 - `Discount Amount` on this row is the per-line discount. It is separate
   from the order-level discount in `SoldOrders`.
+
+  
+---
+
+## 3. Direct Checkout Payments
+
+**Source file pattern:** `EtsyDirectCheckoutPayments*.csv`
+**Export location:** Etsy Shop Manager → Finances → Payment account → Download CSV
+**Row meaning:** one payment record per order. This is the financial ledger.
+
+### Required columns
+
+| Column | Type | Notes |
+|---|---|---|
+| `Payment ID` | string | Unique per payment record |
+| `Order ID` | string | Foreign key to `SoldOrders` |
+| `Gross Amount` | decimal | Amount charged before fees |
+| `Fees` | decimal | Total fees kept by Etsy (transaction + processing) |
+| `Net Amount` | decimal | Amount credited to the shop |
+| `Refund Amount` | decimal | Amount refunded to the buyer |
+| `Currency` | string | ISO code, e.g. `USD` |
+| `Status` | string | e.g. `SETTLED` |
+| `Funds Available` | date | Date when funds become available for payout |
+| `Order Date` | date | Date of the original order |
+
+### Optional columns
+
+`Buyer Username`, `Buyer Name`, `Posted Gross`, `Posted Fees`,
+`Posted Net`, `Adjusted Gross`, `Adjusted Fees`, `Adjusted Net`,
+`Listing Amount`, `Listing Currency`, `Exchange Rate`,
+`VAT Amount`, `Gift Card Applied?`, `Buyer`, `Order Type`,
+`Payment Type`.
+
+### Validation rules
+
+- `Payment ID` must be non-empty and unique.
+- `Order ID` must be non-empty and exist in `SoldOrders`.
+  Orphans are recorded as data quality issues.
+- `Gross Amount`, `Fees`, `Net Amount`, `Refund Amount` must parse as decimals.
+- The following identity must hold for every row:
+  `Gross Amount − Fees = Net Amount`.
+  A mismatch is an error.
+- `Refund Amount` is usually `0`. A non-zero value indicates a refund.
+- `Status` is expected to be `SETTLED` for completed transactions.
+  Other values should be logged but not treated as errors in the MVP.
+
+### Notes
+
+- This file is the **only authoritative source** for fees, net amounts,
+  and refunds. `SoldOrders.Card Processing Fees` and `SoldOrders.Order Net`
+  must match the corresponding values here for the same `Order ID`.
+- `Gross Amount` is the amount charged to the buyer *after* discounts.
+  It corresponds to `SoldOrders.Order Value − SoldOrders.Discount Amount`.
+- `Listing Amount` and `Order Total` in other files are buyer-facing amounts
+  that may include VAT or currency presentation. They are **not** used for
+  revenue calculations.
+- Fee attribution per product is not possible from this file: fees are
+  recorded at the order level, not at the line-item level.
