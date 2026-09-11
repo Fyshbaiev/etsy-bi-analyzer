@@ -13,6 +13,25 @@ from src.importer import service
 FIXTURE = Path(__file__).parent / "fixtures" / "EtsySoldOrders_sample.csv"
 
 
+PAYMENTS_HEADER = (
+    '"Payment ID","Order ID","Gross Amount","Fees","Net Amount",'
+    '"Refund Amount","Currency","Status","Funds Available","Order Date"\n'
+)
+PAYMENTS_BODY = (
+    '111,1001,6.99,0.46,6.53,0,USD,SETTLED,01/02/2026,01/01/2026\n'
+    '222,1002,5.24,0.41,4.83,0,USD,SETTLED,01/03/2026,01/02/2026\n'
+)
+
+ITEMS_HEADER = (
+    '"Sale Date","Item Name","Quantity","Price","Item Total","Currency",'
+    '"Transaction ID","Listing ID","Order ID","SKU"\n'
+)
+ITEMS_BODY = (
+    '01/01/26,"A",1,6.99,6.99,USD,TX1,LST1,1001,\n'
+    '01/02/26,"B",1,5.24,5.24,USD,TX2,LST2,1002,\n'
+)
+
+
 @pytest.fixture()
 def conn(tmp_path: Path):
     connection = connect_and_init(tmp_path / "test.db")
@@ -95,7 +114,7 @@ def test_parse_error_is_logged(conn, tmp_path: Path) -> None:
 
 
 def test_duplicate_rows_are_logged(conn, tmp_path: Path) -> None:
-    """Rows with duplicate order_id within one file are skipped + logged."""
+    """Rows with duplicate order_id are skipped and logged."""
     header = (
         '"Sale Date","Order ID","Currency","Order Value","Discount Amount",'
         '"Order Total","Card Processing Fees","Order Net"\n'
@@ -116,3 +135,31 @@ def test_duplicate_rows_are_logged(conn, tmp_path: Path) -> None:
 
     issues = issues_repo.issues_for_import(conn, result.import_id)
     assert any(i["check_name"] == "duplicate_order_id" for i in issues)
+
+
+def test_import_payments(conn, tmp_path: Path) -> None:
+    p = tmp_path / "EtsyDirectCheckoutPayments2026.csv"
+    p.write_text(PAYMENTS_HEADER + PAYMENTS_BODY, encoding="utf-8")
+    result = service.import_file(conn, p)
+    assert result.file_type == "payments"
+    assert result.rows_inserted == 2
+    assert result.status == "SUCCESS"
+
+
+def test_import_order_items(conn, tmp_path: Path) -> None:
+    """Order items import without a matching orders row (see ADR-003)."""
+    p = tmp_path / "EtsySoldOrderItems2026.csv"
+    p.write_text(ITEMS_HEADER + ITEMS_BODY, encoding="utf-8")
+    result = service.import_file(conn, p)
+    assert result.file_type == "order_items"
+    assert result.rows_inserted == 2
+    assert result.status == "SUCCESS"
+
+
+def test_import_payments_without_orders(conn, tmp_path: Path) -> None:
+    """Payments can load before orders (see ADR-003)."""
+    p = tmp_path / "EtsyDirectCheckoutPayments2026.csv"
+    p.write_text(PAYMENTS_HEADER + PAYMENTS_BODY, encoding="utf-8")
+    result = service.import_file(conn, p)
+    assert result.status == "SUCCESS"
+    assert result.rows_inserted == 2

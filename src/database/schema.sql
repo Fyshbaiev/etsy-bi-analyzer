@@ -1,6 +1,9 @@
 -- Etsy BI Analyzer — SQLite schema
 -- This file is the canonical definition of the database.
 -- All repository code must match this schema.
+--
+-- See docs/adr/003-no-foreign-keys.md for why order_items and payments
+-- do not reference orders.
 
 PRAGMA foreign_keys = ON;
 
@@ -68,6 +71,7 @@ CREATE INDEX IF NOT EXISTS idx_orders_buyer   ON orders(buyer_user_id);
 -- =============================================================
 -- order_items
 -- One row per line item. Source: EtsySoldOrderItems*.csv
+-- No FK to orders. See docs/adr/003-no-foreign-keys.md.
 -- =============================================================
 
 CREATE TABLE IF NOT EXISTS order_items (
@@ -89,7 +93,6 @@ CREATE TABLE IF NOT EXISTS order_items (
     vat_paid_by_buyer   REAL NOT NULL DEFAULT 0,
     sku                 TEXT,
     import_id           INTEGER NOT NULL,
-    FOREIGN KEY (order_id)  REFERENCES orders(order_id),
     FOREIGN KEY (import_id) REFERENCES imports(import_id)
 );
 
@@ -100,6 +103,7 @@ CREATE INDEX IF NOT EXISTS idx_order_items_date    ON order_items(sale_date);
 -- =============================================================
 -- payments
 -- One row per payment. Source: EtsyDirectCheckoutPayments*.csv
+-- No FK to orders. See docs/adr/003-no-foreign-keys.md.
 -- =============================================================
 
 CREATE TABLE IF NOT EXISTS payments (
@@ -120,7 +124,6 @@ CREATE TABLE IF NOT EXISTS payments (
     funds_available     TEXT,
     order_date          TEXT NOT NULL,
     import_id           INTEGER NOT NULL,
-    FOREIGN KEY (order_id)  REFERENCES orders(order_id),
     FOREIGN KEY (import_id) REFERENCES imports(import_id)
 );
 

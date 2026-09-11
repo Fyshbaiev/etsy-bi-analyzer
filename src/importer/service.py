@@ -1,7 +1,7 @@
 """Import service.
 
 Ties together: file hash check → import record → parser → repository
-→ data quality logging. This is the entry point the UI will call.
+→ data quality logging.
 """
 
 from __future__ import annotations
@@ -12,15 +12,18 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.database.repositories import imports_repo, issues_repo, orders_repo
-from src.importer.parsers.orders import (
-    OrdersParseError,
-    parse_orders,
+from src.database.repositories import (
+    imports_repo,
+    issues_repo,
+    order_items_repo,
+    orders_repo,
+    payments_repo,
 )
+from src.importer.parsers import order_items as order_items_parser
+from src.importer.parsers import orders as orders_parser
+from src.importer.parsers import payments as payments_parser
 
 
-# Filename patterns → internal file type. Order matters: more specific
-# patterns must be listed before more general ones.
 _FILENAME_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"^EtsySoldOrderItems.*\.csv$", re.IGNORECASE), "order_items"),
     (re.compile(r"^EtsySoldOrders.*\.csv$", re.IGNORECASE), "orders"),
@@ -30,14 +33,21 @@ _FILENAME_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
-# Which file types the service can currently process end to end.
-SUPPORTED_TYPES: frozenset[str] = frozenset({"orders"})
+SUPPORTED_TYPES: frozenset[str] = frozenset({
+    "orders", "order_items", "payments",
+})
+
+
+# Human-readable names for duplicate check_names per table.
+_DUPLICATE_CHECK_NAMES: dict[str, str] = {
+    "orders": "duplicate_order_id",
+    "payments": "duplicate_payment_id",
+    "order_items": "duplicate_transaction_id",
+}
 
 
 @dataclass
 class ImportResult:
-    """Outcome of one import operation."""
-
     import_id: int | None
     file_type: str
     filename: str
@@ -68,6 +78,35 @@ def detect_file_type(filename: str) -> str | None:
         if pattern.match(name):
             return kind
     return None
+
+
+def _dispatch_parse(
+    file_type: str, path: Path
+) -> list[dict]:
+    """Parse a file according to its declared type."""
+    if file_type == "orders":
+        return orders_parser.parse_orders(path)
+    if file_type == "payments":
+        return payments_parser.parse_payments(path)
+    if file_type == "order_items":
+        return order_items_parser.parse_order_items(path)
+    raise ValueError(f"Unsupported file type: {file_type!r}")
+
+
+def _dispatch_insert(
+    file_type: str,
+    conn: sqlite3.Connection,
+    rows: list[dict],
+    import_id: int,
+) -> int:
+    """Insert parsed rows according to file type. Returns rows inserted."""
+    if file_type == "orders":
+        return orders_repo.insert_orders(conn, rows, import_id)
+    if file_type == "payments":
+        return payments_repo.insert_payments(conn, rows, import_id)
+    if file_type == "order_items":
+        return order_items_repo.insert_order_items(conn, rows, import_id)
+    raise ValueError(f"Unsupported file type: {file_type!r}")
 
 
 def import_file(
@@ -124,19 +163,17 @@ def import_file(
     )
 
     try:
-        rows = parse_orders(path)
-    except OrdersParseError as e:
+        rows = _dispatch_parse(resolved_type, path)
+    except Exception as e:
         issues_repo.add_issue(
             conn,
             check_name="parse_error",
             severity="ERROR",
             message=str(e),
             import_id=import_id,
-            table_name="orders",
+            table_name=resolved_type,
         )
-        imports_repo.update_import_stats(
-            conn, import_id, 0, 0, 0, "FAILED"
-        )
+        imports_repo.update_import_stats(conn, import_id, 0, 0, 0, "FAILED")
         return ImportResult(
             import_id=import_id,
             file_type=resolved_type,
@@ -148,17 +185,18 @@ def import_file(
         )
 
     rows_total = len(rows)
-    rows_inserted = orders_repo.insert_orders(conn, rows, import_id)
+    rows_inserted = _dispatch_insert(resolved_type, conn, rows, import_id)
     rows_skipped = rows_total - rows_inserted
 
     if rows_skipped > 0:
+        check_name = _DUPLICATE_CHECK_NAMES.get(resolved_type, "duplicate_row")
         issues_repo.add_issue(
             conn,
-            check_name="duplicate_order_id",
+            check_name=check_name,
             severity="INFO",
             message=f"{rows_skipped} rows skipped as duplicates.",
             import_id=import_id,
-            table_name="orders",
+            table_name=resolved_type,
         )
 
     status = "SUCCESS" if rows_skipped == 0 else "SUCCESS_WITH_WARNINGS"
