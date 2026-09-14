@@ -1,12 +1,8 @@
 """Main application window.
 
-This is the minimum viable UI:
-  - two toolbar buttons: Import Folder, Generate Report
-  - two tabs: Dashboard (KPI cards), Data Quality (issue table)
-  - a status bar
-
-All data comes from the analytics, reconciliation, and reports modules.
-No business logic lives here.
+Assembles the toolbar, tabs, and per-page widgets. All data flows
+from analytics, insights, and reports modules — no business logic
+lives here.
 """
 
 from __future__ import annotations
@@ -15,43 +11,25 @@ import sqlite3
 import traceback
 from pathlib import Path
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QFileDialog,
-    QGroupBox,
-    QHBoxLayout,
-    QHeaderView,
-    QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
     QTabWidget,
-    QVBoxLayout,
-    QWidget,
 )
 
-from src.analytics.kpi import KPI, compute_kpi
+from src.app.pages.countries_page import CountriesPage
+from src.app.pages.dashboard_page import DashboardPage
+from src.app.pages.data_quality_page import DataQualityPage
+from src.app.pages.insights_page import InsightsPage
+from src.app.pages.products_page import ProductsPage
+from src.app.pages.sales_page import SalesPage
 from src.core import paths
 from src.database.connection import connect_and_init
-from src.database.repositories import issues_repo
 from src.importer import service
 from src.reports import excel
-
-
-# KPI labels shown in the Dashboard in the order they appear.
-_KPI_FIELDS: list[tuple[str, str, str]] = [
-    ("Gross Revenue", "gross_revenue", "$"),
-    ("Net Revenue", "net_revenue", "$"),
-    ("Fees", "fees", "$"),
-    ("Refunds", "refunds", "$"),
-    ("Orders", "orders_count", ""),
-    ("Items Sold", "items_sold", ""),
-    ("Average Order Value", "average_order_value", "$"),
-    ("Fee Ratio", "fee_ratio", "%"),
-]
 
 
 class MainWindow(QMainWindow):
@@ -60,13 +38,11 @@ class MainWindow(QMainWindow):
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
         self.setWindowTitle("Etsy BI Analyzer")
-        self.resize(1000, 700)
+        self.resize(1200, 800)
 
         self._db_path = db_path or paths.database_file()
         paths.ensure_app_dirs()
         self._conn: sqlite3.Connection = connect_and_init(self._db_path)
-
-        self._kpi_labels: dict[str, QLabel] = {}
 
         self._build_toolbar()
         self._build_tabs()
@@ -88,55 +64,32 @@ class MainWindow(QMainWindow):
         self.report_button = QPushButton("Generate Report")
         self.report_button.clicked.connect(self._on_generate_report)
 
+        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.clicked.connect(self._refresh_all)
+
         bar.addWidget(self.import_button)
         bar.addWidget(self.report_button)
+        bar.addSeparator()
+        bar.addWidget(self.refresh_button)
 
     def _build_tabs(self) -> None:
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_dashboard_tab(), "Dashboard")
-        self.tabs.addTab(self._build_data_quality_tab(), "Data Quality")
+
+        self.dashboard_page = DashboardPage(self._conn)
+        self.sales_page = SalesPage(self._conn)
+        self.products_page = ProductsPage(self._conn)
+        self.countries_page = CountriesPage(self._conn)
+        self.data_quality_page = DataQualityPage(self._conn)
+        self.insights_page = InsightsPage(self._conn)
+
+        self.tabs.addTab(self.dashboard_page, "Dashboard")
+        self.tabs.addTab(self.sales_page, "Sales")
+        self.tabs.addTab(self.products_page, "Products")
+        self.tabs.addTab(self.countries_page, "Countries")
+        self.tabs.addTab(self.data_quality_page, "Data Quality")
+        self.tabs.addTab(self.insights_page, "Insights")
+
         self.setCentralWidget(self.tabs)
-
-    def _build_dashboard_tab(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        box = QGroupBox("Key Performance Indicators")
-        form = QVBoxLayout(box)
-
-        for label, key, _ in _KPI_FIELDS:
-            row = QHBoxLayout()
-            title = QLabel(label)
-            title.setMinimumWidth(180)
-            value = QLabel("—")
-            value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            value.setStyleSheet("font-weight: bold; font-size: 14px;")
-            row.addWidget(title)
-            row.addWidget(value)
-            form.addLayout(row)
-            self._kpi_labels[key] = value
-
-        layout.addWidget(box)
-        layout.addStretch(1)
-        return widget
-
-    def _build_data_quality_tab(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        self.issues_table = QTableWidget()
-        self.issues_table.setColumnCount(4)
-        self.issues_table.setHorizontalHeaderLabels(
-            ["Severity", "Check", "Table", "Message"]
-        )
-        header = self.issues_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.Stretch)
-
-        layout.addWidget(self.issues_table)
-        return widget
 
     def _build_status_bar(self) -> None:
         self.statusBar().showMessage("Ready")
@@ -231,40 +184,16 @@ class MainWindow(QMainWindow):
     # -----------------------------------------------------------
 
     def _refresh_all(self) -> None:
-        self._refresh_kpi()
-        self._refresh_issues()
-        self.statusBar().showMessage(
-            f"Database: {self._db_path}"
-        )
-
-    def _refresh_kpi(self) -> None:
-        kpi: KPI = compute_kpi(self._conn)
-        for _, key, kind in _KPI_FIELDS:
-            value = getattr(kpi, key)
-            if kind == "$":
-                text = f"${value:,.2f}"
-            elif kind == "%":
-                text = f"{value:.1%}"
-            else:
-                text = f"{value}"
-            self._kpi_labels[key].setText(text)
-
-    def _refresh_issues(self) -> None:
-        issues = issues_repo.list_issues(self._conn, limit=200)
-        self.issues_table.setRowCount(len(issues))
-        for row_idx, issue in enumerate(issues):
-            self.issues_table.setItem(
-                row_idx, 0, QTableWidgetItem(issue["severity"])
-            )
-            self.issues_table.setItem(
-                row_idx, 1, QTableWidgetItem(issue["check_name"])
-            )
-            self.issues_table.setItem(
-                row_idx, 2, QTableWidgetItem(issue["table_name"] or "")
-            )
-            self.issues_table.setItem(
-                row_idx, 3, QTableWidgetItem(issue["message"])
-            )
+        for page in (
+            self.dashboard_page,
+            self.sales_page,
+            self.products_page,
+            self.countries_page,
+            self.data_quality_page,
+            self.insights_page,
+        ):
+            page.refresh()
+        self.statusBar().showMessage(f"Database: {self._db_path}")
 
     # -----------------------------------------------------------
     # Lifecycle

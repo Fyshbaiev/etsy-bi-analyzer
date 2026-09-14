@@ -96,3 +96,47 @@ def issues_for_import(
         (import_id,),
     ).fetchall()
     return [dict(r) for r in rows]
+def grouped_counts(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Return one row per (check_name, severity) with a count.
+
+    Used by the Data Quality page to avoid listing hundreds of
+    identical rows. Sorted by severity (ERROR first) then count desc.
+    """
+    rows = conn.execute(
+        """
+        SELECT
+            check_name,
+            severity,
+            table_name,
+            COUNT(*) AS count,
+            MIN(message) AS sample_message
+        FROM data_quality_issues
+        GROUP BY check_name, severity, table_name
+        ORDER BY
+            CASE severity
+                WHEN 'ERROR' THEN 1
+                WHEN 'WARNING' THEN 2
+                ELSE 3
+            END,
+            count DESC
+        """
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def issues_for_check(
+    conn: sqlite3.Connection,
+    check_name: str,
+    limit: int = 500,
+) -> list[dict[str, Any]]:
+    """Return all issues for a specific check_name."""
+    rows = conn.execute(
+        """
+        SELECT * FROM data_quality_issues
+        WHERE check_name = ?
+        ORDER BY issue_id
+        LIMIT ?
+        """,
+        (check_name, limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
